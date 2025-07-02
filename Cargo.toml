@@ -1,0 +1,37 @@
+[package]
+name = "masaka"
+version = "0.1.0"
+edition = "2021"
+description = "A highly modular, no-std async MQTT client"
+
+[dependencies]
+embedded-io = { version = "0.6", default-features = false, features = ["alloc"] }
+embedded-io-async = { version = "0.6", default-features = false, features = ["alloc"] }
+heapless = "0.8"
+log = "0.4"
+mqtt-proto = { path = "../mqtt-proto", default-features = false }
+nb = "1"
+
+# Async runtime
+embassy-time = { version = "0.4", optional = true }
+embassy-net = { version = "0.7", optional = true }
+tokio = { version = "1", optional = true, features = ["net", "time"] }
+
+# TLS
+# rustls = { version = "0.23", optional = true }
+
+[dev-dependencies]
+env_logger = "0.11"
+socket2 = "0.5"
+tokio-rustls = "0.26"
+rustls-native-certs = "0.7"
+tokio = { version = "1", features = ["full"] }
+embassy-executor = "0.7"
+embassy-time = "0.4"
+
+[features]
+default = ["std"]
+std = ["dep:tokio", "embedded-io/std", "embedded-io-async/std", "mqtt-proto/std"]
+embassy = ["dep:embassy-time", "dep:embassy-net"]
+tls = []
+# tls = ["dep:rustls"]
