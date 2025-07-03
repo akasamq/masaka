@@ -41,20 +41,19 @@ pub trait MqttProtocolHandler {
         clean_session: bool,
     ) -> Result<Self::Packet, Self::Error>;
 
-    // TODO: Add support for CONNECT with Will message
-    // This is a critical missing method that violates MQTT specification
-    // fn create_connect_with_will_packet(
-    //     &self,
-    //     client_id: &str,
-    //     username: Option<&str>,
-    //     password: Option<&[u8]>,
-    //     keep_alive: u16,
-    //     clean_session: bool,
-    //     will_topic: &TopicName,
-    //     will_message: &[u8],
-    //     will_qos: QoS,
-    //     will_retain: bool,
-    // ) -> Result<Self::Packet, Self::Error>;
+    /// Creates a `CONNECT` packet with a will message.
+    fn create_connect_with_will_packet(
+        &self,
+        client_id: &str,
+        username: Option<&str>,
+        password: Option<&[u8]>,
+        keep_alive: u16,
+        clean_session: bool,
+        will_topic: &TopicName,
+        will_message: &[u8],
+        will_qos: QoS,
+        will_retain: bool,
+    ) -> Result<Self::Packet, Self::Error>;
 
     /// Creates a `PUBLISH` packet.
     fn create_publish_packet(
@@ -311,24 +310,26 @@ where
 
         self.set_keep_alive_interval(keep_alive);
 
-        // Create CONNECT packet - with will message support
-        let connect_packet = if will_topic.is_some() {
-            // Special handling required for v3 handler to support will message
-            self.create_connect_with_will(
-                client_id,
-                username,
-                password,
-                keep_alive,
-                clean_session,
-                will_topic,
-                will_message,
-                will_qos,
-                will_retain,
-            )?
-        } else {
-            self.handler
+        // Create CONNECT packet
+        let connect_packet = match (will_topic, will_message, will_qos) {
+            (Some(topic), Some(message), Some(qos)) => self
+                .handler
+                .create_connect_with_will_packet(
+                    client_id,
+                    username,
+                    password,
+                    keep_alive,
+                    clean_session,
+                    topic,
+                    message,
+                    qos,
+                    will_retain,
+                )
+                .map_err(Into::into)?,
+            _ => self
+                .handler
                 .create_connect_packet(client_id, username, password, keep_alive, clean_session)
-                .map_err(Into::into)?
+                .map_err(Into::into)?,
         };
 
         // Send CONNECT packet
