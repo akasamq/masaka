@@ -21,7 +21,7 @@ where
     TP: TimeProvider,
 {
     config: ClientConfig,
-    protocol_engine: MqttProtocolEngine<T, H>,
+    protocol_engine: MqttProtocolEngine<T, H, TP>,
     state: ClientState,
     time_provider: TP,
     reconnect_attempt: u32,
@@ -46,7 +46,7 @@ where
     T: MqttTransport + Unpin,
     H: MqttProtocolHandler,
     H::Error: From<TransportError>,
-    TP: TimeProvider,
+    TP: TimeProvider + Clone,
 {
     /// Creates a new MQTT client with a custom time provider.
     pub fn with_time_provider(
@@ -60,7 +60,11 @@ where
             config.max_subscriptions,
             config.max_inflight_messages,
         );
-        let protocol_engine = MqttProtocolEngine::new(transport, protocol_handler);
+        let protocol_engine = MqttProtocolEngine::with_time_provider(
+            transport,
+            protocol_handler,
+            time_provider.clone(),
+        );
 
         Self {
             config,
@@ -121,7 +125,7 @@ where
                 // TODO: Implement session resumption logic
                 // If `session_present` is true and clean_session is false, the client should:
                 // 1. Resend any pending QoS 1/2 messages that were not acknowledged
-                // 2. Restore subscription state from previous session  
+                // 2. Restore subscription state from previous session
                 // 3. Handle any messages queued by the broker during disconnection
                 // This is critical for reliable message delivery in persistent sessions
 
@@ -148,7 +152,9 @@ where
             }
             _ => {
                 self.state.set_connection_state(ConnectionState::Error);
-                Err(MqttError::Protocol(MqttProtoError::InvalidHeader))
+                Err(MqttError::Protocol(
+                    MqttProtoError::InvalidHeader.to_string(),
+                ))
             }
         }
     }
@@ -385,7 +391,7 @@ where
                 self.state.add_received_message(message.clone());
 
                 // TODO: Implement proper QoS handling here
-                // For QoS 1: Should send PUBACK automatically  
+                // For QoS 1: Should send PUBACK automatically
                 // For QoS 2: Should send PUBREC and manage PUBREL/PUBCOMP flow
                 // Current implementation delegates this to protocol engine but
                 // client should maintain QoS state for reliability
@@ -406,7 +412,7 @@ where
             // TODO: Handle additional PacketActions for complete QoS state machine:
             // - PublishAck: Confirm QoS 1 message delivery
             // - PublishRec: Handle QoS 2 PUBREC
-            // - PublishRelease: Handle QoS 2 PUBREL  
+            // - PublishRelease: Handle QoS 2 PUBREL
             // - PublishComplete: Confirm QoS 2 completion
             // - ConnectAck: Should be handled in connect() method
             _ => Ok(None),

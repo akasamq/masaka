@@ -35,7 +35,7 @@ pub trait MqttTransport: Read<Error = TransportError> + Write<Error = TransportE
 //    - Should support both std::net and embassy-net
 //    - Handle connection timeouts and keepalive
 //
-// 2. TlsTransport: TLS-secured TCP transport  
+// 2. TlsTransport: TLS-secured TCP transport
 //    - Support both rustls and native-tls backends
 //    - Certificate validation and custom CA support
 //

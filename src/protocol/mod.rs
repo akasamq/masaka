@@ -9,7 +9,14 @@ use mqtt_proto::{
 };
 
 use crate::error::{MqttError, TransportError};
+use crate::time::{DefaultTimeProvider, TimeProvider};
 use crate::transport::MqttTransport;
+
+pub mod v3;
+pub mod v5;
+
+pub use v3::V3Handler;
+pub use v5::V5Handler;
 
 /// Handles MQTT protocol-level logic for a specific version.
 pub trait MqttProtocolHandler {
@@ -131,13 +138,15 @@ pub enum PacketAction {
     None,
 }
 
-pub struct MqttProtocolEngine<T, H>
+pub struct MqttProtocolEngine<T, H, TP = DefaultTimeProvider>
 where
     T: MqttTransport + Unpin,
     H: MqttProtocolHandler,
+    TP: TimeProvider,
 {
     transport: T,
     handler: H,
+    time_provider: TP,
 
     // Decoding state
     packet_state: GenericPollPacketState<H::Header>,
@@ -180,16 +189,29 @@ pub struct PendingAck {
     pub timestamp: u64,
 }
 
-impl<T, H> MqttProtocolEngine<T, H>
+impl<T, H> MqttProtocolEngine<T, H, DefaultTimeProvider>
 where
     T: MqttTransport + Unpin,
     H: MqttProtocolHandler,
 {
-    /// Creates a new protocol engine.
+    /// Creates a new protocol engine with the default time provider.
     pub fn new(transport: T, handler: H) -> Self {
+        Self::with_time_provider(transport, handler, DefaultTimeProvider::default())
+    }
+}
+
+impl<T, H, TP> MqttProtocolEngine<T, H, TP>
+where
+    T: MqttTransport + Unpin,
+    H: MqttProtocolHandler,
+    TP: TimeProvider,
+{
+    /// Creates a new protocol engine with a custom time provider.
+    pub fn with_time_provider(transport: T, handler: H, time_provider: TP) -> Self {
         Self {
             transport,
             handler,
+            time_provider,
             packet_state: GenericPollPacketState::default(),
             write_queue: VecDeque::new(),
             pending_publishes: BTreeMap::new(),
@@ -330,7 +352,9 @@ where
                     Err(MqttError::AuthenticationFailed)
                 }
             }
-            _ => Err(MqttError::Protocol(MqttProtoError::InvalidHeader)),
+            _ => Err(MqttError::Protocol(
+                MqttProtoError::InvalidHeader.to_string(),
+            )),
         }
     }
 
@@ -344,14 +368,15 @@ where
         clean_session: bool,
         will_topic: Option<&TopicName>,
         will_message: Option<&[u8]>,
-        will_qos: Option<QoS>,
-        will_retain: bool,
+        _will_qos: Option<QoS>,
+        _will_retain: bool,
     ) -> Result<H::Packet, MqttError> {
-        // TODO: Extend MqttProtocolHandler trait to support will message
-        // This is a critical missing feature that violates the MQTT spec
-        // The trait needs to be extended with a create_connect_with_will_packet method
-        // Currently falling back to basic connect without will message
-        log::warn!("Will message support not implemented, creating basic CONNECT packet");
+        // TODO: Fix will message support properly
+        // For now, just log and create basic connect packet
+        if will_topic.is_some() && will_message.is_some() {
+            log::warn!("Will message configured but not yet supported in generic handler");
+        }
+
         self.handler
             .create_connect_packet(client_id, username, password, keep_alive, clean_session)
             .map_err(Into::into)
@@ -389,7 +414,7 @@ where
                     retain,
                     payload: payload.to_vec(),
                     retry_count: 0,
-                    timestamp: 0, // TODO: Get current timestamp from TimeProvider
+                    timestamp: self.time_provider.current_timestamp_ms(),
                 },
             );
         }
@@ -459,8 +484,7 @@ where
     /// Receives and processes the next MQTT packet from the transport.
     pub async fn receive_packet(&mut self) -> Result<PacketAction, MqttError> {
         let packet = self.read_from_transport().await?;
-        // TODO: Add TimeProvider to MqttProtocolEngine to get proper timestamp
-        let current_time = 0; // FIXME: This should get real timestamp from TimeProvider
+        let current_time = self.time_provider.current_timestamp_ms();
         self.update_last_received_time(current_time);
 
         let action = self.handler.handle_packet(packet).map_err(Into::into)?;
@@ -530,7 +554,7 @@ where
 
     /// Reads a complete MQTT packet from the transport.
     async fn read_from_transport(&mut self) -> Result<H::Packet, MqttError> {
-        let mut poll_packet = GenericPollPacket::new(&mut self.packet_state, &mut self.transport);
+        let poll_packet = GenericPollPacket::new(&mut self.packet_state, &mut self.transport);
         let (_encode_len, _body, packet) = poll_packet.await.map_err(Into::into)?;
         Ok(packet)
     }
@@ -541,7 +565,7 @@ where
         self.write_queue.push_back(encoded);
         self.flush_write_queue().await?;
 
-        let current_time = 0; // TODO: Get current timestamp
+        let current_time = self.time_provider.current_timestamp_ms();
         self.update_last_sent_time(current_time);
         Ok(())
     }
@@ -630,179 +654,5 @@ where
         }
 
         Ok(())
-    }
-}
-
-// TODO: Implement concrete protocol handlers for V3 and V5
-// Current implementation is missing specific handlers for:
-// - V3Handler: MQTT v3.1.1 protocol implementation 
-// - V5Handler: MQTT v5.0 protocol implementation with properties support
-// These should be implemented in separate modules (v3.rs, v5.rs)
-
-/// MQTT v3.1.1 Protocol Handler
-/// TODO: Complete implementation - currently missing
-pub struct V3Handler {
-    // TODO: Add V3-specific state and configuration
-}
-
-impl MqttProtocolHandler for V3Handler {
-    type Packet = mqtt_proto::v3::Packet;
-    type Error = mqtt_proto::Error;
-    type Header = mqtt_proto::v3::Header;
-
-    // TODO: Implement all required methods for V3 protocol
-    fn create_connect_packet(
-        &self,
-        _client_id: &str,
-        _username: Option<&str>,
-        _password: Option<&[u8]>,
-        _keep_alive: u16,
-        _clean_session: bool,
-    ) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V3 CONNECT packet creation")
-    }
-
-    fn create_publish_packet(
-        &self,
-        _topic: &TopicName,
-        _qos: QoS,
-        _retain: bool,
-        _payload: &[u8],
-        _pid: Option<Pid>,
-    ) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V3 PUBLISH packet creation")
-    }
-
-    // TODO: Implement remaining methods...
-    fn create_subscribe_packet(
-        &self,
-        _subscriptions: &[(TopicFilter, QoS)],
-        _pid: Pid,
-    ) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V3 SUBSCRIBE packet creation")
-    }
-
-    fn create_unsubscribe_packet(
-        &self,
-        _topics: &[TopicFilter],
-        _pid: Pid,
-    ) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V3 UNSUBSCRIBE packet creation")
-    }
-
-    fn create_puback_packet(&self, _pid: Pid) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V3 PUBACK packet creation")
-    }
-
-    fn create_pubrec_packet(&self, _pid: Pid) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V3 PUBREC packet creation")
-    }
-
-    fn create_pubrel_packet(&self, _pid: Pid) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V3 PUBREL packet creation")
-    }
-
-    fn create_pubcomp_packet(&self, _pid: Pid) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V3 PUBCOMP packet creation")
-    }
-
-    fn create_pingreq_packet(&self) -> Self::Packet {
-        todo!("Implement V3 PINGREQ packet creation")
-    }
-
-    fn create_disconnect_packet(&self) -> Self::Packet {
-        todo!("Implement V3 DISCONNECT packet creation")
-    }
-
-    fn encode_packet(&self, _packet: &Self::Packet) -> Result<VarBytes, Self::Error> {
-        todo!("Implement V3 packet encoding")
-    }
-
-    fn handle_packet(&mut self, _packet: Self::Packet) -> Result<PacketAction, Self::Error> {
-        todo!("Implement V3 packet handling")
-    }
-}
-
-/// MQTT v5.0 Protocol Handler  
-/// TODO: Complete implementation - currently missing
-pub struct V5Handler {
-    // TODO: Add V5-specific state including properties support
-}
-
-impl MqttProtocolHandler for V5Handler {
-    type Packet = mqtt_proto::v5::Packet;
-    type Error = mqtt_proto::v5::ErrorV5;
-    type Header = mqtt_proto::v5::Header;
-
-    // TODO: Implement all required methods for V5 protocol with properties support
-    fn create_connect_packet(
-        &self,
-        _client_id: &str,
-        _username: Option<&str>,
-        _password: Option<&[u8]>,
-        _keep_alive: u16,
-        _clean_session: bool,
-    ) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V5 CONNECT packet creation with properties")
-    }
-
-    fn create_publish_packet(
-        &self,
-        _topic: &TopicName,
-        _qos: QoS,
-        _retain: bool,
-        _payload: &[u8],
-        _pid: Option<Pid>,
-    ) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V5 PUBLISH packet creation with properties")
-    }
-
-    // TODO: Implement remaining methods with V5 properties and reason codes...
-    fn create_subscribe_packet(
-        &self,
-        _subscriptions: &[(TopicFilter, QoS)],
-        _pid: Pid,
-    ) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V5 SUBSCRIBE packet creation")
-    }
-
-    fn create_unsubscribe_packet(
-        &self,
-        _topics: &[TopicFilter],
-        _pid: Pid,
-    ) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V5 UNSUBSCRIBE packet creation")
-    }
-
-    fn create_puback_packet(&self, _pid: Pid) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V5 PUBACK packet creation")
-    }
-
-    fn create_pubrec_packet(&self, _pid: Pid) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V5 PUBREC packet creation")
-    }
-
-    fn create_pubrel_packet(&self, _pid: Pid) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V5 PUBREL packet creation")
-    }
-
-    fn create_pubcomp_packet(&self, _pid: Pid) -> Result<Self::Packet, Self::Error> {
-        todo!("Implement V5 PUBCOMP packet creation")
-    }
-
-    fn create_pingreq_packet(&self) -> Self::Packet {
-        todo!("Implement V5 PINGREQ packet creation")
-    }
-
-    fn create_disconnect_packet(&self) -> Self::Packet {
-        todo!("Implement V5 DISCONNECT packet creation")
-    }
-
-    fn encode_packet(&self, _packet: &Self::Packet) -> Result<VarBytes, Self::Error> {
-        todo!("Implement V5 packet encoding")
-    }
-
-    fn handle_packet(&mut self, _packet: Self::Packet) -> Result<PacketAction, Self::Error> {
-        todo!("Implement V5 packet handling with properties and reason codes")
     }
 }

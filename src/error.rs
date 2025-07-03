@@ -66,10 +66,23 @@ impl From<embedded_io::ErrorKind> for TransportError {
     }
 }
 
+impl embedded_io::Error for TransportError {
+    fn kind(&self) -> embedded_io::ErrorKind {
+        match self {
+            Self::ConnectionFailed => embedded_io::ErrorKind::Other,
+            Self::ConnectionLost => embedded_io::ErrorKind::ConnectionAborted,
+            Self::TlsHandshakeFailed => embedded_io::ErrorKind::Other,
+            Self::Timeout => embedded_io::ErrorKind::TimedOut,
+            Self::Io(kind) => *kind,
+            Self::Other(_) => embedded_io::ErrorKind::Other,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MqttError {
     /// Protocol error
-    Protocol(mqtt_proto::Error),
+    Protocol(String),
     /// Transport error
     Transport(TransportError),
     /// Invalid connection state
@@ -91,7 +104,7 @@ pub enum MqttError {
 impl fmt::Display for MqttError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Protocol(err) => write!(f, "Protocol error: {:?}", err),
+            Self::Protocol(err) => write!(f, "Protocol error: {}", err),
             Self::Transport(err) => write!(f, "Transport error: {}", err),
             Self::InvalidState => write!(f, "Invalid connection state"),
             Self::NotConnected => write!(f, "Client not connected"),
@@ -106,7 +119,13 @@ impl fmt::Display for MqttError {
 
 impl From<mqtt_proto::Error> for MqttError {
     fn from(err: mqtt_proto::Error) -> Self {
-        Self::Protocol(err)
+        Self::Protocol(err.to_string())
+    }
+}
+
+impl From<mqtt_proto::v5::ErrorV5> for MqttError {
+    fn from(err: mqtt_proto::v5::ErrorV5) -> Self {
+        Self::Protocol(err.to_string())
     }
 }
 

@@ -5,9 +5,9 @@ edition = "2021"
 description = "A highly modular, no-std async MQTT client"
 
 [dependencies]
+bytes = { version = "1", default-features = false }
 embedded-io = { version = "0.6", default-features = false, features = ["alloc"] }
 embedded-io-async = { version = "0.6", default-features = false, features = ["alloc"] }
-heapless = "0.8"
 log = "0.4"
 mqtt-proto = { path = "../mqtt-proto", default-features = false }
 nb = "1"
