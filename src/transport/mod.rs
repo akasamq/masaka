@@ -1,3 +1,18 @@
+#[cfg(feature = "tokio")]
+mod tokio;
+#[cfg(feature = "tokio")]
+pub use tokio::TcpTransport;
+
+#[cfg(feature = "embassy")]
+mod embassy;
+#[cfg(feature = "embassy")]
+pub use embassy::TcpTransport;
+
+#[cfg(test)]
+mod mock;
+#[cfg(test)]
+pub use mock::MockTransport;
+
 use embedded_io_async::{Read, Write};
 
 use crate::error::TransportError;
@@ -27,27 +42,3 @@ pub trait MqttTransport: Read<Error = TransportError> + Write<Error = TransportE
         None
     }
 }
-
-// TODO: Implement concrete transport implementations
-// The following transport implementations are missing but essential for a complete MQTT client:
-//
-// 1. TcpTransport: Basic TCP socket transport
-//    - Should support both std::net and embassy-net
-//    - Handle connection timeouts and keepalive
-//
-// 2. TlsTransport: TLS-secured TCP transport
-//    - Support both rustls and native-tls backends
-//    - Certificate validation and custom CA support
-//
-// 3. WebSocketTransport: WebSocket transport for browser environments
-//    - MQTT over WebSocket protocol support
-//    - Compatible with web assemblies
-//
-// 4. UnixSocketTransport: Unix domain socket for local IPC
-//    - Useful for edge computing and local services
-//
-// 5. SerialTransport: Serial port transport for embedded devices
-//    - Support embedded-hal serial traits
-//    - Handle framing for MQTT over serial
-//
-// These should be implemented in separate modules: tcp.rs, tls.rs, websocket.rs, etc.

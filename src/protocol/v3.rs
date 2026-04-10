@@ -1,3 +1,4 @@
+use alloc::string::ToString;
 use alloc::sync::Arc;
 
 use bytes::Bytes;
@@ -35,10 +36,10 @@ impl MqttProtocolHandler for V3Handler {
         let connect = Connect {
             protocol: Protocol::V311,
             keep_alive,
-            client_id: Arc::new(client_id.to_string()),
+            client_id: client_id.into(),
             clean_session,
             last_will: None, // TODO: Will be handled by create_connect_with_will_packet
-            username: username.map(|s| Arc::new(s.to_string())),
+            username: username.map(|s| s.into()),
             password: password.map(|p| Bytes::from(p.to_vec())),
         };
 
@@ -67,10 +68,10 @@ impl MqttProtocolHandler for V3Handler {
         let connect = Connect {
             protocol: Protocol::V311,
             keep_alive,
-            client_id: Arc::new(client_id.to_string()),
+            client_id: client_id.into(),
             clean_session,
             last_will,
-            username: username.map(|s| Arc::new(s.to_string())),
+            username: username.map(|s| s.into()),
             password: password.map(|p| Bytes::from(p.to_vec())),
         };
 
@@ -84,6 +85,7 @@ impl MqttProtocolHandler for V3Handler {
         retain: bool,
         payload: &[u8],
         pid: Option<Pid>,
+        dup: bool,
     ) -> Result<Self::Packet, Self::Error> {
         let qos_pid = match qos {
             QoS::Level0 => {
@@ -97,7 +99,7 @@ impl MqttProtocolHandler for V3Handler {
         };
 
         let publish = Publish {
-            dup: false, // Will be set to true on retransmission
+            dup,
             qos_pid,
             retain,
             topic_name: topic.clone(),
@@ -118,7 +120,7 @@ impl MqttProtocolHandler for V3Handler {
 
         let subscribe = Subscribe {
             pid,
-            topics: subscriptions.iter().cloned().collect(),
+            topics: subscriptions.to_vec(),
         };
 
         Ok(Packet::Subscribe(subscribe))
@@ -135,7 +137,7 @@ impl MqttProtocolHandler for V3Handler {
 
         let unsubscribe = Unsubscribe {
             pid,
-            topics: topics.iter().cloned().collect(),
+            topics: topics.to_vec(),
         };
 
         Ok(Packet::Unsubscribe(unsubscribe))
@@ -216,40 +218,5 @@ impl MqttProtocolHandler for V3Handler {
                 Err(MqttProtoError::InvalidHeader)
             }
         }
-    }
-}
-
-impl V3Handler {
-    /// Creates a CONNECT packet with will message support
-    pub fn create_connect_with_will_packet(
-        &self,
-        client_id: &str,
-        username: Option<&str>,
-        password: Option<&[u8]>,
-        keep_alive: u16,
-        clean_session: bool,
-        will_topic: &TopicName,
-        will_message: &[u8],
-        will_qos: QoS,
-        will_retain: bool,
-    ) -> Result<Packet, MqttProtoError> {
-        let last_will = Some(v3::LastWill {
-            topic_name: will_topic.clone(),
-            message: Bytes::from(will_message.to_vec()),
-            qos: will_qos,
-            retain: will_retain,
-        });
-
-        let connect = Connect {
-            protocol: Protocol::V311,
-            keep_alive,
-            client_id: Arc::new(client_id.to_string()),
-            clean_session,
-            last_will,
-            username: username.map(|s| Arc::new(s.to_string())),
-            password: password.map(|p| Bytes::from(p.to_vec())),
-        };
-
-        Ok(Packet::Connect(connect))
     }
 }

@@ -10,12 +10,13 @@ pub trait TimeProvider {
     async fn delay(&self, duration: Duration);
 }
 
-#[cfg(feature = "std")]
+/// A `tokio` runtime time provider.
+#[cfg(feature = "tokio")]
 #[derive(Debug, Clone, Default)]
-pub struct StdTimeProvider;
+pub struct TokioTimeProvider;
 
-#[cfg(feature = "std")]
-impl TimeProvider for StdTimeProvider {
+#[cfg(feature = "tokio")]
+impl TimeProvider for TokioTimeProvider {
     fn current_timestamp_ms(&self) -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -28,6 +29,7 @@ impl TimeProvider for StdTimeProvider {
     }
 }
 
+/// A `embassy` runtime time provider.
 #[cfg(feature = "embassy")]
 #[derive(Debug, Clone, Default)]
 pub struct EmbassyTimeProvider;
@@ -46,8 +48,10 @@ impl TimeProvider for EmbassyTimeProvider {
     }
 }
 
-#[cfg(feature = "std")]
-pub type DefaultTimeProvider = StdTimeProvider;
+#[cfg(feature = "tokio")]
+#[doc(hidden)]
+pub type DefaultTimeProvider = TokioTimeProvider;
 
 #[cfg(feature = "embassy")]
+#[doc(hidden)]
 pub type DefaultTimeProvider = EmbassyTimeProvider;

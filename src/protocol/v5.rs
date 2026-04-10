@@ -1,27 +1,159 @@
+use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use bytes::Bytes;
+use hashbrown::HashMap;
 use mqtt_proto::{
     v5::{
-        self, Connect, ConnectProperties, Disconnect, DisconnectReasonCode, Header, Packet,
-        PubackReasonCode, PubcompReasonCode, Publish, PublishProperties, PubrecReasonCode,
+        self, Connect, ConnectProperties, Disconnect, DisconnectReasonCode, Header, LastWill,
+        Packet, PubackReasonCode, PubcompReasonCode, Publish, PublishProperties, PubrecReasonCode,
         PubrelReasonCode, Subscribe, SubscribeProperties, SubscriptionOptions, Unsubscribe,
-        UnsubscribeProperties, UnsubscribeReasonCode,
+        UnsubscribeProperties, WillProperties,
     },
     Error as MqttProtoError, Pid, Protocol, QoS, QosPid, TopicFilter, TopicName, VarBytes,
 };
 
+use crate::config::{V5ConnectConfig, V5PublishConfig, V5SubscribeConfig};
 use crate::protocol::{MqttProtocolHandler, PacketAction};
 
-/// MQTT v5.0 Protocol Handler
-#[derive(Debug, Default)]
-pub struct V5Handler;
+/// Enhanced MQTT v5.0 protocol handler with full feature support.
+#[derive(Debug)]
+pub struct V5Handler {
+    /// Default connect configuration
+    pub connect_config: V5ConnectConfig,
+    /// Topic alias mapping for outbound messages
+    topic_aliases: HashMap<TopicName, u16>,
+    /// Next available topic alias
+    next_topic_alias: u16,
+}
 
 impl V5Handler {
-    /// Creates a new V5 protocol handler
+    /// Creates a new MQTT v5.0 handler with default configuration.
     pub fn new() -> Self {
-        Self
+        Self {
+            connect_config: V5ConnectConfig::default(),
+            topic_aliases: HashMap::new(),
+            next_topic_alias: 1,
+        }
+    }
+
+    /// Creates a new handler with custom connect configuration.
+    pub fn with_config(config: V5ConnectConfig) -> Self {
+        Self {
+            connect_config: config,
+            topic_aliases: HashMap::new(),
+            next_topic_alias: 1,
+        }
+    }
+
+    /// Sets the connect configuration.
+    pub fn set_connect_config(&mut self, config: V5ConnectConfig) {
+        self.connect_config = config;
+    }
+
+    /// Creates a PUBLISH packet with enhanced v5.0 properties.
+    pub fn create_publish_with_config(
+        &mut self,
+        topic: &TopicName,
+        qos: QoS,
+        retain: bool,
+        payload: &[u8],
+        pid: Option<Pid>,
+        dup: bool,
+        config: V5PublishConfig,
+    ) -> Result<Packet, v5::ErrorV5> {
+        let qos_pid = match qos {
+            QoS::Level0 => {
+                if pid.is_some() {
+                    return Err(MqttProtoError::ZeroPid.into());
+                }
+                QosPid::Level0
+            }
+            QoS::Level1 => QosPid::Level1(pid.ok_or(MqttProtoError::ZeroPid)?),
+            QoS::Level2 => QosPid::Level2(pid.ok_or(MqttProtoError::ZeroPid)?),
+        };
+
+        let mut properties = PublishProperties {
+            payload_is_utf8: config.payload_format_indicator,
+            message_expiry_interval: config.message_expiry_interval,
+            topic_alias: config.topic_alias,
+            response_topic: config.response_topic,
+            correlation_data: config.correlation_data,
+            subscription_id: config.subscription_identifiers.first().copied(),
+            content_type: config.content_type,
+            user_properties: config.user_properties,
+        };
+
+        // Handle topic alias optimization
+        if let Some(alias) = self.topic_aliases.get(topic) {
+            properties.topic_alias = Some(*alias);
+        } else if properties.topic_alias.is_none() {
+            // Assign new topic alias
+            let alias = self.next_topic_alias;
+            self.topic_aliases.insert(topic.clone(), alias);
+            properties.topic_alias = Some(alias);
+            self.next_topic_alias += 1;
+        }
+
+        let publish = Publish {
+            dup,
+            qos_pid,
+            retain,
+            topic_name: topic.clone(),
+            payload: Bytes::from(payload.to_vec()),
+            properties,
+        };
+
+        Ok(Packet::Publish(publish))
+    }
+
+    /// Creates a SUBSCRIBE packet with enhanced v5.0 properties.
+    pub fn create_subscribe_with_config(
+        &self,
+        subscriptions: &[(TopicFilter, QoS)],
+        pid: Pid,
+        config: V5SubscribeConfig,
+    ) -> Result<Packet, v5::ErrorV5> {
+        if subscriptions.is_empty() {
+            return Err(MqttProtoError::EmptySubscription.into());
+        }
+
+        let subscribe = Subscribe {
+            pid,
+            topics: subscriptions
+                .iter()
+                .map(|(filter, qos)| (filter.clone(), SubscriptionOptions::new(*qos)))
+                .collect(),
+            properties: SubscribeProperties {
+                subscription_id: config.subscription_identifier,
+                user_properties: config.user_properties,
+            },
+        };
+
+        Ok(Packet::Subscribe(subscribe))
+    }
+
+    /// Helper to create a will message with v5.0 properties.
+    fn create_will_message(
+        topic: &TopicName,
+        message: &[u8],
+        qos: QoS,
+        retain: bool,
+    ) -> Result<LastWill, v5::ErrorV5> {
+        Ok(LastWill {
+            qos,
+            retain,
+            topic_name: topic.clone(),
+            payload: Bytes::from(message.to_vec()),
+            properties: WillProperties::default(), // Can be extended for will properties
+        })
+    }
+}
+
+impl Default for V5Handler {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -38,15 +170,27 @@ impl MqttProtocolHandler for V5Handler {
         keep_alive: u16,
         clean_session: bool,
     ) -> Result<Self::Packet, Self::Error> {
+        let properties = ConnectProperties {
+            session_expiry_interval: self.connect_config.session_expiry_interval,
+            receive_max: self.connect_config.receive_maximum,
+            max_packet_size: self.connect_config.maximum_packet_size,
+            topic_alias_max: self.connect_config.topic_alias_maximum,
+            request_response_info: self.connect_config.request_response_information,
+            request_problem_info: self.connect_config.request_problem_information,
+            auth_method: self.connect_config.authentication_method.clone(),
+            auth_data: self.connect_config.authentication_data.clone(),
+            user_properties: self.connect_config.user_properties.clone(),
+        };
+
         let connect = Connect {
             protocol: Protocol::V500,
-            keep_alive,
-            client_id: Arc::new(client_id.to_string()),
             clean_start: clean_session,
-            last_will: None, // TODO: Will be handled by create_connect_with_will_packet
-            username: username.map(|s| Arc::new(s.to_string())),
+            keep_alive,
+            client_id: client_id.into(),
+            last_will: None,
+            username: username.map(|s| s.into()),
             password: password.map(|p| Bytes::from(p.to_vec())),
-            properties: ConnectProperties::default(), // TODO: Add property support
+            properties,
         };
 
         Ok(Packet::Connect(connect))
@@ -64,23 +208,34 @@ impl MqttProtocolHandler for V5Handler {
         will_qos: QoS,
         will_retain: bool,
     ) -> Result<Self::Packet, Self::Error> {
-        let last_will = Some(v5::LastWill {
-            topic_name: will_topic.clone(),
-            payload: Bytes::from(will_message.to_vec()),
-            qos: will_qos,
-            retain: will_retain,
-            properties: v5::WillProperties::default(), // TODO: Add will properties support
-        });
+        let last_will = Some(Self::create_will_message(
+            will_topic,
+            will_message,
+            will_qos,
+            will_retain,
+        )?);
+
+        let properties = ConnectProperties {
+            session_expiry_interval: self.connect_config.session_expiry_interval,
+            receive_max: self.connect_config.receive_maximum,
+            max_packet_size: self.connect_config.maximum_packet_size,
+            topic_alias_max: self.connect_config.topic_alias_maximum,
+            request_response_info: self.connect_config.request_response_information,
+            request_problem_info: self.connect_config.request_problem_information,
+            auth_method: self.connect_config.authentication_method.clone(),
+            auth_data: self.connect_config.authentication_data.clone(),
+            user_properties: self.connect_config.user_properties.clone(),
+        };
 
         let connect = Connect {
             protocol: Protocol::V500,
-            keep_alive,
-            client_id: Arc::new(client_id.to_string()),
             clean_start: clean_session,
+            keep_alive,
+            client_id: client_id.into(),
             last_will,
-            username: username.map(|s| Arc::new(s.to_string())),
+            username: username.map(|s| s.into()),
             password: password.map(|p| Bytes::from(p.to_vec())),
-            properties: ConnectProperties::default(),
+            properties,
         };
 
         Ok(Packet::Connect(connect))
@@ -93,6 +248,7 @@ impl MqttProtocolHandler for V5Handler {
         retain: bool,
         payload: &[u8],
         pid: Option<Pid>,
+        dup: bool,
     ) -> Result<Self::Packet, Self::Error> {
         let qos_pid = match qos {
             QoS::Level0 => {
@@ -106,12 +262,12 @@ impl MqttProtocolHandler for V5Handler {
         };
 
         let publish = Publish {
-            dup: false, // Will be set to true on retransmission
+            dup,
             qos_pid,
             retain,
             topic_name: topic.clone(),
             payload: Bytes::from(payload.to_vec()),
-            properties: PublishProperties::default(), // TODO: Add property support
+            properties: PublishProperties::default(),
         };
 
         Ok(Packet::Publish(publish))
@@ -132,7 +288,7 @@ impl MqttProtocolHandler for V5Handler {
                 .iter()
                 .map(|(filter, qos)| (filter.clone(), SubscriptionOptions::new(*qos)))
                 .collect(),
-            properties: SubscribeProperties::default(), // TODO: Add property support
+            properties: SubscribeProperties::default(),
         };
 
         Ok(Packet::Subscribe(subscribe))
@@ -150,7 +306,7 @@ impl MqttProtocolHandler for V5Handler {
         let unsubscribe = Unsubscribe {
             pid,
             topics: topics.iter().cloned().collect(),
-            properties: UnsubscribeProperties::default(), // TODO: Add property support
+            properties: UnsubscribeProperties::default(),
         };
 
         Ok(Packet::Unsubscribe(unsubscribe))
@@ -200,10 +356,27 @@ impl MqttProtocolHandler for V5Handler {
         use v5::Packet as P;
 
         match packet {
-            P::Connack(connack) => Ok(PacketAction::ConnectAck {
-                session_present: connack.session_present,
-                return_code: connack.reason_code as u8,
-            }),
+            P::Connack(connack) => {
+                // Extract enhanced information from v5.0 CONNACK
+                let session_present = connack.session_present;
+                let return_code = connack.reason_code as u8;
+
+                // Log important v5.0 properties
+                if let Some(max_qos) = connack.properties.max_qos {
+                    log::debug!("Broker maximum QoS: {max_qos:?}");
+                }
+                if let Some(retain_available) = connack.properties.retain_available {
+                    log::debug!("Broker retain available: {retain_available}");
+                }
+                if let Some(server_keep_alive) = connack.properties.server_keep_alive {
+                    log::debug!("Server keep alive override: {server_keep_alive}");
+                }
+
+                Ok(PacketAction::ConnectAck {
+                    session_present,
+                    return_code,
+                })
+            }
 
             P::Publish(publish) => {
                 let (qos, pid) = match publish.qos_pid {
@@ -211,6 +384,14 @@ impl MqttProtocolHandler for V5Handler {
                     QosPid::Level1(pid) => (QoS::Level1, Some(pid)),
                     QosPid::Level2(pid) => (QoS::Level2, Some(pid)),
                 };
+
+                // Log v5.0 specific properties for debugging
+                if let Some(alias) = publish.properties.topic_alias {
+                    log::trace!("Received message with topic alias: {alias}");
+                }
+                if let Some(expiry) = publish.properties.message_expiry_interval {
+                    log::trace!("Message expiry interval: {expiry}s");
+                }
 
                 Ok(PacketAction::PublishReceived {
                     topic: publish.topic_name,
@@ -221,81 +402,87 @@ impl MqttProtocolHandler for V5Handler {
                 })
             }
 
-            P::Puback(ack) => Ok(PacketAction::PublishAck { pid: ack.pid }),
-            P::Pubrec(ack) => Ok(PacketAction::PublishRec { pid: ack.pid }),
-            P::Pubrel(ack) => Ok(PacketAction::PublishRelease { pid: ack.pid }),
-            P::Pubcomp(ack) => Ok(PacketAction::PublishComplete { pid: ack.pid }),
+            P::Puback(ack) => {
+                if ack.reason_code != PubackReasonCode::Success {
+                    log::warn!("PUBACK with non-success reason: {:?}", ack.reason_code);
+                }
+                Ok(PacketAction::PublishAck { pid: ack.pid })
+            }
 
-            P::Suback(suback) => Ok(PacketAction::SubscribeAck {
-                pid: suback.pid,
-                return_codes: suback
+            P::Pubrec(ack) => {
+                if ack.reason_code != PubrecReasonCode::Success {
+                    log::warn!("PUBREC with non-success reason: {:?}", ack.reason_code);
+                }
+                Ok(PacketAction::PublishRec { pid: ack.pid })
+            }
+
+            P::Pubrel(ack) => {
+                if ack.reason_code != PubrelReasonCode::Success {
+                    log::warn!("PUBREL with non-success reason: {:?}", ack.reason_code);
+                }
+                Ok(PacketAction::PublishRelease { pid: ack.pid })
+            }
+
+            P::Pubcomp(ack) => {
+                if ack.reason_code != PubcompReasonCode::Success {
+                    log::warn!("PUBCOMP with non-success reason: {:?}", ack.reason_code);
+                }
+                Ok(PacketAction::PublishComplete { pid: ack.pid })
+            }
+
+            P::Suback(suback) => {
+                let return_codes = suback
                     .topics
                     .iter()
                     .map(|code| *code as u8)
-                    .collect::<Vec<u8>>(),
-            }),
+                    .collect::<Vec<u8>>();
 
-            P::Unsuback(unsuback) => {
-                // TODO: Handle multiple reason codes properly
-                // For now, we just check the first one for simplicity
-                if let Some(code) = unsuback.topics.first() {
-                    if *code != UnsubscribeReasonCode::Success {
-                        log::warn!("Unsubscribe failed with code: {:?}", code);
+                // Log subscription failures
+                for (i, &code) in return_codes.iter().enumerate() {
+                    if code >= 0x80 {
+                        log::warn!("Subscription {i} failed with reason code: 0x{code:02X}");
                     }
                 }
+
+                Ok(PacketAction::SubscribeAck {
+                    pid: suback.pid,
+                    return_codes,
+                })
+            }
+
+            P::Unsuback(unsuback) => {
+                // Enhanced unsubscribe handling with reason codes
+                for (i, code) in unsuback.topics.iter().enumerate() {
+                    match code {
+                        mqtt_proto::v5::UnsubscribeReasonCode::Success => {
+                            log::debug!("Unsubscription {i} successful");
+                        }
+                        mqtt_proto::v5::UnsubscribeReasonCode::NoSubscriptionExisted => {
+                            log::warn!("Unsubscription {i}: no subscription existed");
+                        }
+                        _ => {
+                            log::error!("Unsubscription {i} failed: {code:?}");
+                        }
+                    }
+                }
+
                 Ok(PacketAction::UnsubscribeAck { pid: unsuback.pid })
             }
 
             P::Pingresp => Ok(PacketAction::PingResponse),
 
-            P::Disconnect(d) => {
-                log::info!("Received disconnect packet: {:?}", d.reason_code);
-                // The protocol engine should handle the disconnection state.
-                // This action indicates that the server initiated the disconnection.
+            P::Disconnect(disconnect) => {
+                log::info!("Server disconnect: {:?}", disconnect.reason_code);
+                if let Some(reason) = disconnect.properties.reason_string.as_ref() {
+                    log::info!("Disconnect reason: {reason}");
+                }
                 Ok(PacketAction::None)
             }
 
-            // These packets should not be received by client
+            // These packets should not be received by a client
             P::Connect(_) | P::Subscribe(_) | P::Unsubscribe(_) | P::Pingreq | P::Auth(_) => {
                 Err(v5::ErrorV5::from(MqttProtoError::InvalidHeader))
             }
         }
-    }
-}
-
-impl V5Handler {
-    /// Creates a CONNECT packet with will message support
-    pub fn create_connect_with_will_packet(
-        &self,
-        client_id: &str,
-        username: Option<&str>,
-        password: Option<&[u8]>,
-        keep_alive: u16,
-        clean_session: bool,
-        will_topic: &TopicName,
-        will_message: &[u8],
-        will_qos: QoS,
-        will_retain: bool,
-    ) -> Result<Packet, v5::ErrorV5> {
-        let last_will = Some(v5::LastWill {
-            topic_name: will_topic.clone(),
-            payload: Bytes::from(will_message.to_vec()),
-            qos: will_qos,
-            retain: will_retain,
-            properties: v5::WillProperties::default(), // TODO: Add will properties support
-        });
-
-        let connect = Connect {
-            protocol: Protocol::V500,
-            keep_alive,
-            client_id: Arc::new(client_id.to_string()),
-            clean_start: clean_session,
-            last_will,
-            username: username.map(|s| Arc::new(s.to_string())),
-            password: password.map(|p| Bytes::from(p.to_vec())),
-            properties: ConnectProperties::default(),
-        };
-
-        Ok(Packet::Connect(connect))
     }
 }

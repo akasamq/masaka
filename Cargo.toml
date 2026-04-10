@@ -6,32 +6,43 @@ description = "A highly modular, no-std async MQTT client"
 
 [dependencies]
 bytes = { version = "1", default-features = false }
-embedded-io = { version = "0.6", default-features = false, features = ["alloc"] }
-embedded-io-async = { version = "0.6", default-features = false, features = ["alloc"] }
-log = "0.4"
-mqtt-proto = { path = "../mqtt-proto", default-features = false }
-nb = "1"
+embedded-io = { version = "0.7", default-features = false, features = ["alloc"] }
+embedded-io-async = { version = "0.7", default-features = false, features = ["alloc"] }
+hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
+log = { version = "0.4", default-features = false }
+mqtt-proto = { git = "https://github.com/akasamq/mqtt-proto.git", branch = "master", default-features = false }
+nb = { version = "1", default-features = false }
 
 # Async runtime
-embassy-time = { version = "0.4", optional = true }
-embassy-net = { version = "0.7", optional = true }
-tokio = { version = "1", optional = true, features = ["net", "time"] }
+embassy-net = { version = "0.9", features = ["alloc", "dhcpv4", "tcp"], optional = true }
+embassy-time = { version = "0.5", optional = true }
+tokio = { version = "1", features = ["net", "time", "io-util"], optional = true }
 
 # TLS
 # rustls = { version = "0.23", optional = true }
 
 [dev-dependencies]
-env_logger = "0.11"
-socket2 = "0.5"
-tokio-rustls = "0.26"
-rustls-native-certs = "0.7"
-tokio = { version = "1", features = ["full"] }
-embassy-executor = "0.7"
-embassy-time = "0.4"
+critical-section = { version = "1", features = ["std"] }
+embassy-executor = { version = "0.10", features = ["executor-thread", "platform-std"] }
+embassy-time = { version = "0.5", features = ["generic-queue-16", "std"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [features]
-default = ["std"]
-std = ["dep:tokio", "embedded-io/std", "embedded-io-async/std", "mqtt-proto/std"]
-embassy = ["dep:embassy-time", "dep:embassy-net"]
+default = ["embassy", "std"]
+
+std = [
+    "dep:tokio",
+    "bytes/std",
+    "embassy-net?/std",
+    "embassy-time?/std",
+    "embedded-io/std",
+    "embedded-io-async/std",
+    "mqtt-proto/std"
+]
+
+# Async runtime
+embassy = ["dep:embassy-net", "dep:embassy-time"]
+tokio = ["mqtt-proto/tokio", "std", "dep:tokio"]
+
 tls = []
 # tls = ["dep:rustls"]

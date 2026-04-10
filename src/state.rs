@@ -1,6 +1,6 @@
 use core::fmt;
 
-use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
+use alloc::collections::VecDeque;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -77,29 +77,15 @@ pub struct ClientState {
     /// The current state of the connection.
     connection_state: ConnectionState,
 
-    /// The client identifier.
-    client_id: String,
-
-    /// Indicates if this is a clean session.
-    clean_session: bool,
-
-    /// The keep-alive interval in seconds.
-    keep_alive: u16,
-
-    /// A map of active subscriptions, keyed by packet ID.
-    subscriptions: BTreeMap<Pid, SubscriptionInfo>,
-
-    /// A set of confirmed subscription topics.
-    active_topics: BTreeSet<TopicFilter>,
-
     /// A queue of received messages.
     received_messages: VecDeque<ReceivedMessage>,
 
     /// Client statistics.
     stats: ClientStats,
 
-    /// The maximum number of subscriptions.
-    sub_capacity: usize,
+    /// Indicates if the session was unexpectedly disconnected.
+    clean_session: bool,
+
     /// The maximum number of messages in the receive queue.
     msg_capacity: usize,
 }
@@ -124,22 +110,16 @@ pub struct ClientStats {
     pub error_count: u32,
 }
 
-const DEFAULT_SUB_CAPACITY: usize = 32;
 const DEFAULT_MSG_CAPACITY: usize = 64;
 
 impl ClientState {
     /// Creates a new `ClientState`.
-    pub fn new(client_id: String, sub_capacity: usize, msg_capacity: usize) -> Self {
+    pub fn new(_client_id: String, msg_capacity: usize, clean_session: bool) -> Self {
         Self {
             connection_state: ConnectionState::Disconnected,
-            client_id,
-            clean_session: true,
-            keep_alive: 60,
-            subscriptions: BTreeMap::new(),
-            active_topics: BTreeSet::new(),
             received_messages: VecDeque::with_capacity(msg_capacity),
             stats: ClientStats::default(),
-            sub_capacity,
+            clean_session,
             msg_capacity,
         }
     }
@@ -173,11 +153,6 @@ impl ClientState {
                     // Unexpected disconnect, increment reconnect count
                     self.stats.reconnect_count += 1;
                 }
-
-                // Clean up state (if Clean Session)
-                if self.clean_session {
-                    self.clear_session_state();
-                }
             }
             (_, ConnectionState::Error) => {
                 self.stats.error_count += 1;
@@ -188,107 +163,12 @@ impl ClientState {
         self.connection_state = state;
     }
 
-    /// Returns the client ID.
-    pub fn client_id(&self) -> &str {
-        &self.client_id
-    }
-
-    /// Sets session parameters like clean session and keep-alive.
-    pub fn set_session_params(&mut self, clean_session: bool, keep_alive: u16) {
-        self.clean_session = clean_session;
-        self.keep_alive = keep_alive;
-    }
-
-    /// Adds a new pending subscription.
-    pub fn add_subscription(
-        &mut self,
-        pid: Pid,
-        topic_filter: TopicFilter,
-        qos: QoS,
-    ) -> Result<(), ()> {
-        if self.subscriptions.len() >= self.sub_capacity {
-            return Err(());
-        }
-
-        let subscription = SubscriptionInfo {
-            topic_filter: topic_filter.clone(),
-            qos,
-            state: SubscriptionState::Pending,
-            retry_count: 0,
-        };
-
-        self.subscriptions.insert(pid, subscription);
-        log::debug!(
-            "Added subscription: {} (PID: {})",
-            topic_filter,
-            pid.value()
-        );
-        Ok(())
-    }
-
-    /// Confirms a subscription based on the `SUBACK` response.
-    pub fn confirm_subscription(&mut self, pid: Pid, return_codes: &[u8]) -> Result<(), ()> {
-        if let Some(subscription) = self.subscriptions.get_mut(&pid) {
-            // Check return codes (simplified handling, only checks the first one)
-            if let Some(&return_code) = return_codes.first() {
-                if return_code <= 2 {
-                    // QoS 0, 1, 2
-                    subscription.state = SubscriptionState::Active;
-                    if self.active_topics.len() < self.sub_capacity {
-                        self.active_topics.insert(subscription.topic_filter.clone());
-                    } else {
-                        return Err(());
-                    }
-                    log::info!(
-                        "Subscription confirmed: {} (QoS: {})",
-                        subscription.topic_filter,
-                        return_code
-                    );
-                } else {
-                    subscription.state = SubscriptionState::Failed;
-                    log::warn!(
-                        "Subscription failed: {} (return code: {})",
-                        subscription.topic_filter,
-                        return_code
-                    );
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Removes a subscription by its packet ID.
-    pub fn remove_subscription(&mut self, pid: Pid) -> Option<SubscriptionInfo> {
-        if let Some(subscription) = self.subscriptions.remove(&pid) {
-            self.active_topics.remove(&subscription.topic_filter);
-            log::debug!(
-                "Removed subscription: {} (PID: {})",
-                subscription.topic_filter,
-                pid.value()
-            );
-            Some(subscription)
-        } else {
-            None
-        }
-    }
-
-    /// Returns an iterator over active subscriptions.
-    pub fn active_subscriptions(&self) -> impl Iterator<Item = &SubscriptionInfo> {
-        self.subscriptions
-            .values()
-            .filter(|sub| sub.state == SubscriptionState::Active)
-    }
-
-    /// Checks if the client is subscribed to a specific topic filter.
-    pub fn is_subscribed(&self, topic_filter: &TopicFilter) -> bool {
-        self.active_topics.contains(topic_filter)
-    }
-
     /// Adds a received message to the queue.
     pub fn add_received_message(&mut self, message: ReceivedMessage) {
         if self.received_messages.len() >= self.msg_capacity {
             // Queue is full, remove the oldest message
             self.received_messages.pop_front();
+            log::warn!("Received message queue is full, oldest message dropped.");
         }
 
         self.received_messages.push_back(message);
@@ -299,11 +179,6 @@ impl ClientState {
     /// Pops the next received message from the queue.
     pub fn pop_received_message(&mut self) -> Option<ReceivedMessage> {
         self.received_messages.pop_front()
-    }
-
-    /// Returns the number of messages in the received queue.
-    pub fn received_message_count(&self) -> usize {
-        self.received_messages.len()
     }
 
     /// Increments counters for a sent message.
@@ -317,12 +192,10 @@ impl ClientState {
         &self.stats
     }
 
-    /// Clears the session state if clean session is enabled.
-    fn clear_session_state(&mut self) {
-        self.subscriptions.clear();
-        self.active_topics.clear();
+    /// Clears the volatile state.
+    pub fn clear_volatile_state(&mut self) {
         self.received_messages.clear();
-        log::debug!("Session state cleared (Clean Session)");
+        log::debug!("Volatile state cleared");
     }
 
     /// Resets all statistics to zero.
@@ -333,10 +206,6 @@ impl ClientState {
 
 impl Default for ClientState {
     fn default() -> Self {
-        Self::new(
-            "default_client".into(),
-            DEFAULT_SUB_CAPACITY,
-            DEFAULT_MSG_CAPACITY,
-        )
+        Self::new("default_client".into(), DEFAULT_MSG_CAPACITY, true)
     }
 }
