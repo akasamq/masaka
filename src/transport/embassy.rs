@@ -1,3 +1,5 @@
+use core::net::SocketAddr;
+
 use embassy_net::tcp::TcpSocket;
 use embassy_net::IpEndpoint;
 use embedded_io::ErrorType;
@@ -17,10 +19,8 @@ impl<'a> ErrorType for TcpTransport<'a> {
 
 impl<'a> TcpTransport<'a> {
     /// Creates a new `TcpTransport` and connects to the given address.
-    pub async fn new(
-        mut socket: TcpSocket<'a>,
-        remote_endpoint: IpEndpoint,
-    ) -> Result<Self, TransportError> {
+    pub async fn new(mut socket: TcpSocket<'a>, addr: SocketAddr) -> Result<Self, TransportError> {
+        let remote_endpoint: IpEndpoint = addr.into();
         socket
             .connect(remote_endpoint)
             .await
@@ -32,9 +32,6 @@ impl<'a> TcpTransport<'a> {
 impl<'a> MqttTransport for TcpTransport<'a> {
     async fn close(&mut self) -> Result<(), TransportError> {
         self.socket.close();
-        // In embassy-net, close is not async and does not return an error.
-        // It signals the connection to start closing. For a graceful shutdown,
-        // one might want to wait for the socket state to become `Closed`.
         Ok(())
     }
 

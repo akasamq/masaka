@@ -1,6 +1,3 @@
-use alloc::string::ToString;
-use alloc::sync::Arc;
-
 use bytes::Bytes;
 use mqtt_proto::{
     v3::{self, Connect, Header, Packet, Publish, Subscribe, Unsubscribe},

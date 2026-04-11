@@ -1,9 +1,10 @@
+use core::net::SocketAddr;
 use core::time::Duration;
 
 use embedded_io::ErrorType;
 use embedded_io_async::{Read, Write};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpStream, ToSocketAddrs};
+use tokio::net::TcpStream;
 
 use crate::error::TransportError;
 use crate::transport::MqttTransport;
@@ -19,7 +20,7 @@ impl ErrorType for TcpTransport {
 
 impl TcpTransport {
     /// Creates a new `TcpTransport` and connects to the given address.
-    pub async fn new<A: ToSocketAddrs>(addr: A) -> Result<Self, TransportError> {
+    pub async fn new(addr: SocketAddr) -> Result<Self, TransportError> {
         let stream = TcpStream::connect(addr)
             .await
             .map_err(TransportError::from)?;
@@ -29,8 +30,8 @@ impl TcpTransport {
     }
 
     /// Creates a `TcpTransport` with a connection timeout.
-    pub async fn new_with_timeout<A: ToSocketAddrs>(
-        addr: A,
+    pub async fn new_with_timeout(
+        addr: SocketAddr,
         connect_timeout: Duration,
     ) -> Result<Self, TransportError> {
         let connect_future = TcpStream::connect(addr);

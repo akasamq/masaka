@@ -14,7 +14,7 @@ mqtt-proto = { git = "https://github.com/akasamq/mqtt-proto.git", branch = "mast
 nb = { version = "1", default-features = false }
 
 # Async runtime
-embassy-net = { version = "0.9", features = ["alloc", "dhcpv4", "tcp"], optional = true }
+embassy-net = { version = "0.9", features = ["alloc", "dhcpv4", "proto-ipv4", "proto-ipv6", "tcp"], optional = true }
 embassy-time = { version = "0.5", optional = true }
 tokio = { version = "1", features = ["net", "time", "io-util"], optional = true }
 
@@ -22,10 +22,11 @@ tokio = { version = "1", features = ["net", "time", "io-util"], optional = true 
 # rustls = { version = "0.23", optional = true }
 
 [dev-dependencies]
+akasa-core = { git = "https://github.com/akasamq/akasa.git" }
 critical-section = { version = "1", features = ["std"] }
 embassy-executor = { version = "0.10", features = ["executor-thread", "platform-std"] }
 embassy-time = { version = "0.5", features = ["generic-queue-16", "std"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 
 [features]
 default = ["embassy", "std"]
@@ -42,7 +43,7 @@ std = [
 
 # Async runtime
 embassy = ["dep:embassy-net", "dep:embassy-time"]
-tokio = ["mqtt-proto/tokio", "std", "dep:tokio"]
+tokio = ["std", "dep:tokio"]
 
 tls = []
 # tls = ["dep:rustls"]
