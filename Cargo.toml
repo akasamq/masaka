@@ -3,6 +3,9 @@ name = "masaka"
 version = "0.1.0"
 edition = "2021"
 description = "A highly modular, no-std async MQTT client"
+authors = ["Sieluna <seele.peng@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/akasamq/masaka"
 
 [dependencies]
 bytes = { version = "1", default-features = false }
@@ -10,7 +13,7 @@ embedded-io = { version = "0.7", default-features = false, features = ["alloc"] 
 embedded-io-async = { version = "0.7", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
 log = { version = "0.4", default-features = false }
-mqtt-proto = { git = "https://github.com/akasamq/mqtt-proto.git", branch = "master", default-features = false }
+mqtt-proto = { version = "0.4", default-features = false }
 nb = { version = "1", default-features = false }
 
 # Async runtime
