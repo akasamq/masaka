@@ -3,7 +3,9 @@
 extern crate alloc;
 
 #[cfg(not(any(feature = "tokio", feature = "embassy")))]
-compile_error!("A runtime feature must be enabled. Available: 'tokio', 'embassy'. 'embassy' is enabled by default.");
+compile_error!(
+    "A runtime feature must be enabled. Available: 'tokio', 'embassy'. 'embassy' is enabled by default."
+);
 
 pub mod client;
 pub mod config;

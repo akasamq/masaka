@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use mqtt_proto::{
-    v3::{self, Connect, Header, Packet, Publish, Subscribe, Unsubscribe},
     Error as MqttProtoError, Pid, Protocol, QoS, QosPid, TopicFilter, TopicName, VarBytes,
+    v3::{self, Connect, Header, Packet, Publish, Subscribe, Unsubscribe},
 };
 
 use crate::protocol::{MqttProtocolHandler, PacketAction};

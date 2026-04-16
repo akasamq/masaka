@@ -1,8 +1,10 @@
+#![cfg(all(feature = "tokio", not(feature = "embassy")))]
+
 mod common;
 
 use masaka::{
-    protocol::V5Handler, transport::TcpTransport, ClientEvent, MqttClient, PublishConfig, QoS,
-    TopicFilter, V5PublishConfig,
+    ClientEvent, MqttClient, PublishConfig, QoS, TopicFilter, V5PublishConfig, protocol::V5Handler,
+    transport::TcpTransport,
 };
 use tokio::time::timeout;
 

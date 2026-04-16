@@ -1,3 +1,5 @@
+#![cfg(all(feature = "tokio", not(feature = "embassy")))]
+
 mod common;
 
 use tokio::time::timeout;
@@ -20,7 +22,7 @@ async fn v3_connect_and_disconnect() {
 async fn v3_connect_clean_session_true() {
     let addr = common::server().await;
     let config = common::base_config("v3-clean").with_clean_session(true);
-    let mut client = common::client_v3_config(addr, config).await;
+    let client = common::client_v3_config(addr, config).await;
     assert!(client.is_connected());
 }
 
@@ -28,7 +30,7 @@ async fn v3_connect_clean_session_true() {
 async fn v3_connect_clean_session_false() {
     let addr = common::server().await;
     let config = common::base_config("v3-persist").with_clean_session(false);
-    let mut client = common::client_v3_config(addr, config).await;
+    let client = common::client_v3_config(addr, config).await;
     assert!(client.is_connected());
 }
 

@@ -1,10 +1,12 @@
+#![cfg(all(feature = "tokio", not(feature = "embassy")))]
+
 mod common;
 
 use std::time::Duration;
 
 use masaka::{
-    protocol::V3Handler, transport::TcpTransport, ClientEvent, MqttClient, PublishConfig, QoS,
-    TopicFilter,
+    ClientEvent, MqttClient, PublishConfig, QoS, TopicFilter, protocol::V3Handler,
+    state::ReceivedMessage, transport::TcpTransport,
 };
 use tokio::time::timeout;
 
@@ -19,11 +21,12 @@ async fn drain_sub_confirmed(client: &mut MqttClient<TcpTransport, V3Handler>) {
     }
 }
 
-async fn recv_message(client: &mut MqttClient<TcpTransport, V3Handler>) -> ClientEvent {
+async fn recv_message(client: &mut MqttClient<TcpTransport, V3Handler>) -> ReceivedMessage {
     loop {
         let ev = timeout(TIMEOUT, client.poll()).await.unwrap().unwrap();
-        if let Some(e @ ClientEvent::MessageReceived(_)) = ev {
-            return e;
+        if let Some(ClientEvent::MessageReceived(msg)) = ev {
+            let _ = client.next_message();
+            return msg;
         }
     }
 }
@@ -49,9 +52,7 @@ async fn v3_subscribe_exact_topic() {
         .unwrap()
         .unwrap();
 
-    let ClientEvent::MessageReceived(msg) = recv_message(&mut sub).await else {
-        panic!("expected MessageReceived");
-    };
+    let msg = recv_message(&mut sub).await;
     assert_eq!(msg.topic.to_string(), "sensor/temp");
     assert_eq!(msg.payload, b"42");
 }
@@ -81,9 +82,7 @@ async fn v3_subscribe_single_level_wildcard() {
     }
 
     for expected in &["sensor/temp", "sensor/humidity"] {
-        let ClientEvent::MessageReceived(msg) = recv_message(&mut sub).await else {
-            panic!("expected MessageReceived");
-        };
+        let msg = recv_message(&mut sub).await;
         assert_eq!(msg.topic.to_string(), *expected);
     }
 }
@@ -114,9 +113,7 @@ async fn v3_subscribe_multi_level_wildcard() {
     }
 
     for expected in &topics {
-        let ClientEvent::MessageReceived(msg) = recv_message(&mut sub).await else {
-            panic!("expected MessageReceived");
-        };
+        let msg = recv_message(&mut sub).await;
         assert_eq!(msg.topic.to_string(), *expected);
     }
 }
@@ -145,9 +142,7 @@ async fn v3_unsubscribe_stops_delivery() {
     .await
     .unwrap()
     .unwrap();
-    let ClientEvent::MessageReceived(msg) = recv_message(&mut sub).await else {
-        panic!("expected MessageReceived");
-    };
+    let msg = recv_message(&mut sub).await;
     assert_eq!(msg.payload, b"before");
 
     // Unsubscribe.
@@ -213,9 +208,7 @@ async fn v3_subscribe_qos1_receives_qos1_message() {
         }
     }
 
-    let ClientEvent::MessageReceived(msg) = recv_message(&mut sub).await else {
-        panic!("expected MessageReceived");
-    };
+    let msg = recv_message(&mut sub).await;
     assert_eq!(msg.payload, b"qos1 payload");
     assert_eq!(msg.qos, QoS::Level1);
 }

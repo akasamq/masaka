@@ -1,12 +1,16 @@
 use core::net::SocketAddr;
 
-use embassy_net::tcp::TcpSocket;
 use embassy_net::IpEndpoint;
+use embassy_net::tcp::TcpSocket;
 use embedded_io::ErrorType;
 use embedded_io_async::{Read, Write};
 
 use crate::error::TransportError;
 use crate::transport::MqttTransport;
+
+pub trait AsyncReadWrite: Read<Error = TransportError> + Write<Error = TransportError> {}
+
+impl AsyncReadWrite for TcpTransport<'_> {}
 
 /// An transport implementation for MQTT over an embassy-net TCP stream.
 pub struct TcpTransport<'a> {

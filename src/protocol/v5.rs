@@ -3,13 +3,13 @@ use alloc::vec::Vec;
 use bytes::Bytes;
 use hashbrown::HashMap;
 use mqtt_proto::{
+    Error as MqttProtoError, Pid, Protocol, QoS, QosPid, TopicFilter, TopicName, VarBytes,
     v5::{
         self, Connect, ConnectProperties, Disconnect, DisconnectReasonCode, Header, LastWill,
         Packet, PubackReasonCode, PubcompReasonCode, Publish, PublishProperties, PubrecReasonCode,
         PubrelReasonCode, Subscribe, SubscribeProperties, SubscriptionOptions, Unsubscribe,
         UnsubscribeProperties, WillProperties,
     },
-    Error as MqttProtoError, Pid, Protocol, QoS, QosPid, TopicFilter, TopicName, VarBytes,
 };
 
 use crate::config::{V5ConnectConfig, V5PublishConfig, V5SubscribeConfig};
@@ -78,7 +78,7 @@ impl V5Handler {
             topic_alias: config.topic_alias,
             response_topic: config.response_topic,
             correlation_data: config.correlation_data,
-            subscription_id: config.subscription_identifiers.first().copied(),
+            subscription_ids: config.subscription_identifiers,
             content_type: config.content_type,
             user_properties: config.user_properties,
         };

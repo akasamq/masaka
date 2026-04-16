@@ -1,3 +1,5 @@
+#![cfg(all(feature = "tokio", not(feature = "embassy")))]
+
 mod common;
 
 use masaka::{ClientEvent, V5ConnectConfig};
@@ -21,7 +23,7 @@ async fn v5_connect_and_disconnect() {
 async fn v5_connect_clean_session() {
     let addr = common::server().await;
     let config = common::base_config("v5-clean").with_clean_session(true);
-    let client = common::client_v5_full(addr, config, V5ConnectConfig::new()).await;
+    let client = common::client_v5_config(addr, config, V5ConnectConfig::new()).await;
     assert!(client.is_connected());
 }
 
@@ -29,7 +31,7 @@ async fn v5_connect_clean_session() {
 async fn v5_connect_with_session_expiry() {
     let addr = common::server().await;
     let v5_config = V5ConnectConfig::new().with_session_expiry(30);
-    let client = common::client_v5_full(addr, common::base_config("v5-expiry"), v5_config).await;
+    let client = common::client_v5_config(addr, common::base_config("v5-expiry"), v5_config).await;
     assert!(client.is_connected());
 }
 

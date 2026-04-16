@@ -7,6 +7,8 @@ use mqtt_proto::{
     Error as MqttProtoError, GenericPollPacket, GenericPollPacketState, Pid, PollHeader, QoS,
     TopicFilter, TopicName, VarBytes,
 };
+#[cfg(feature = "tokio")]
+use tokio::io::AsyncWriteExt;
 
 use crate::error::{MqttError, ProtocolError, TransportError};
 use crate::session::{InflightMessage, SessionState};
@@ -24,6 +26,14 @@ pub trait MqttProtocolHandler {
     /// The packet type for this protocol version.
     type Packet: Send + Unpin;
     /// The error type for this protocol version.
+    #[cfg(feature = "tokio")]
+    type Error: Into<MqttError>
+        + From<MqttProtoError>
+        + From<TransportError>
+        + From<std::io::Error>
+        + Send
+        + core::fmt::Debug;
+    #[cfg(not(feature = "tokio"))]
     type Error: Into<MqttError>
         + From<MqttProtoError>
         + From<TransportError>
@@ -557,7 +567,7 @@ where
                     .transport
                     .write(&bytes[written..])
                     .await
-                    .map_err(MqttError::Transport)?;
+                    .map_err(|e| MqttError::Transport(e.into()))?;
                 if n == 0 {
                     return Err(MqttError::Transport(TransportError::ConnectionLost));
                 }
@@ -565,7 +575,10 @@ where
             }
         }
 
-        self.transport.flush().await.map_err(MqttError::Transport)?;
+        self.transport
+            .flush()
+            .await
+            .map_err(|e| MqttError::Transport(e.into()))?;
         Ok(())
     }
 

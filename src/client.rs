@@ -353,6 +353,7 @@ where
             .protocol_engine
             .unsubscribe(&topics, &mut self.session_state)
             .await?;
+        self.remove_local_subscription(topic_filter);
 
         log::debug!("Unsubscribed from topic: {topic_filter}");
         Ok(())
@@ -375,6 +376,7 @@ where
             .protocol_engine
             .unsubscribe(topic_filters, &mut self.session_state)
             .await?;
+        self.remove_local_subscriptions(topic_filters);
 
         log::debug!("Unsubscribed from {} topics", topic_filters.len());
         Ok(())
@@ -539,7 +541,6 @@ where
                 Ok(Some(ClientEvent::SubscriptionConfirmed(pid)))
             }
             PacketAction::UnsubscribeAck { pid } => {
-                self.session_state.remove_subscription(pid);
                 Ok(Some(ClientEvent::UnsubscriptionConfirmed(pid)))
             }
             PacketAction::PingResponse => Ok(Some(ClientEvent::PingResponse)),
@@ -548,6 +549,16 @@ where
                 Ok(Some(ClientEvent::MessageAcknowledged(pid)))
             }
             _ => Ok(None),
+        }
+    }
+
+    fn remove_local_subscription(&mut self, topic_filter: &TopicFilter) {
+        let _ = self.session_state.remove_subscription(topic_filter);
+    }
+
+    fn remove_local_subscriptions(&mut self, topic_filters: &[TopicFilter]) {
+        for topic_filter in topic_filters {
+            self.remove_local_subscription(topic_filter);
         }
     }
 

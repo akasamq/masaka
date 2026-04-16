@@ -1,19 +1,17 @@
 #[cfg(feature = "tokio")]
 mod tokio;
 #[cfg(feature = "tokio")]
-pub use tokio::TcpTransport;
+pub use tokio::{AsyncReadWrite, TcpTransport};
 
 #[cfg(feature = "embassy")]
 mod embassy;
 #[cfg(feature = "embassy")]
-pub use embassy::TcpTransport;
+pub use embassy::{AsyncReadWrite, TcpTransport};
 
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
 pub use mock::MockTransport;
-
-use embedded_io_async::{Read, Write};
 
 use crate::error::TransportError;
 
@@ -21,7 +19,7 @@ use crate::error::TransportError;
 ///
 /// This allows the MQTT client to be generic over different network stacks.
 #[allow(async_fn_in_trait)]
-pub trait MqttTransport: Read<Error = TransportError> + Write<Error = TransportError> {
+pub trait MqttTransport: AsyncReadWrite {
     /// Closes the connection gracefully.
     ///
     /// Should be safe to call multiple times.

@@ -71,8 +71,8 @@ pub trait SessionState {
     /// Confirms a subscription based on the `SUBACK` response.
     fn confirm_subscription(&mut self, pid: Pid, return_codes: &[u8]) -> Result<(), MqttError>;
 
-    /// Removes a subscription by its packet ID (on UNSUBACK).
-    fn remove_subscription(&mut self, pid: Pid) -> Option<SubscriptionInfo>;
+    /// Removes a subscription by its topic filter.
+    fn remove_subscription(&mut self, topic_filter: &TopicFilter) -> Option<SubscriptionInfo>;
 
     /// Clears all session state. Called when a clean session starts.
     fn clear(&mut self);

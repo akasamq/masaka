@@ -3,11 +3,9 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
-use embedded_io::ErrorType;
-use embedded_io_async::{Read, Write};
-
 use crate::error::TransportError;
-use crate::transport::MqttTransport;
+
+use super::{AsyncReadWrite, MqttTransport};
 
 /// A mock transport for testing MQTT protocol implementations.
 #[derive(Debug)]
@@ -177,10 +175,6 @@ impl MockTransport {
     }
 }
 
-impl ErrorType for MockTransport {
-    type Error = TransportError;
-}
-
 impl MqttTransport for MockTransport {
     async fn close(&mut self) -> Result<(), TransportError> {
         self.connected.store(false, Ordering::Relaxed);
@@ -200,8 +194,8 @@ impl MqttTransport for MockTransport {
     }
 }
 
-impl Read for MockTransport {
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+impl MockTransport {
+    fn do_read(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
         // Check for simulated connection loss
         if self.simulate_connection_loss {
             self.connected.store(false, Ordering::Relaxed);
@@ -237,10 +231,8 @@ impl Read for MockTransport {
 
         Ok(bytes_to_read)
     }
-}
 
-impl Write for MockTransport {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+    fn do_write(&mut self, buf: &[u8]) -> Result<usize, TransportError> {
         // Check for simulated connection loss
         if self.simulate_connection_loss {
             self.connected.store(false, Ordering::Relaxed);
@@ -262,7 +254,7 @@ impl Write for MockTransport {
         Ok(buf.len())
     }
 
-    async fn flush(&mut self) -> Result<(), Self::Error> {
+    fn do_flush(&mut self) -> Result<(), TransportError> {
         // Check if we're connected
         if !self.is_connected() {
             return Err(TransportError::ConnectionLost);
@@ -270,6 +262,83 @@ impl Write for MockTransport {
 
         // Mock flush always succeeds if connected
         Ok(())
+    }
+}
+
+impl AsyncReadWrite for MockTransport {}
+
+#[cfg(not(feature = "tokio"))]
+impl embedded_io::ErrorType for MockTransport {
+    type Error = TransportError;
+}
+
+#[cfg(not(feature = "tokio"))]
+impl embedded_io_async::Read for MockTransport {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.do_read(buf)
+    }
+}
+
+#[cfg(not(feature = "tokio"))]
+impl embedded_io_async::Write for MockTransport {
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.do_write(buf)
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.do_flush()
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl tokio::io::AsyncRead for MockTransport {
+    fn poll_read(
+        mut self: core::pin::Pin<&mut Self>,
+        _cx: &mut core::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> core::task::Poll<std::io::Result<()>> {
+        let dst = buf.initialize_unfilled();
+        match self.do_read(dst) {
+            Ok(n) => {
+                buf.advance(n);
+                core::task::Poll::Ready(Ok(()))
+            }
+            Err(e) => core::task::Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))),
+        }
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl tokio::io::AsyncWrite for MockTransport {
+    fn poll_write(
+        mut self: core::pin::Pin<&mut Self>,
+        _cx: &mut core::task::Context<'_>,
+        buf: &[u8],
+    ) -> core::task::Poll<std::io::Result<usize>> {
+        core::task::Poll::Ready(
+            self.do_write(buf)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+        )
+    }
+
+    fn poll_flush(
+        mut self: core::pin::Pin<&mut Self>,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<std::io::Result<()>> {
+        core::task::Poll::Ready(
+            self.do_flush()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+        )
+    }
+
+    fn poll_shutdown(
+        self: core::pin::Pin<&mut Self>,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<std::io::Result<()>> {
+        core::task::Poll::Ready(Ok(()))
     }
 }
 

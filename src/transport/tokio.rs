@@ -1,21 +1,21 @@
 use core::net::SocketAddr;
+use core::pin::Pin;
+use core::task::{Context, Poll};
 use core::time::Duration;
 
-use embedded_io::ErrorType;
-use embedded_io_async::{Read, Write};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
 
 use crate::error::TransportError;
 use crate::transport::MqttTransport;
 
+pub trait AsyncReadWrite: tokio::io::AsyncRead + tokio::io::AsyncWrite {}
+
+impl AsyncReadWrite for TcpTransport {}
+
 /// A transport implementation for MQTT over a Tokio-based TCP stream.
 pub struct TcpTransport {
     stream: Option<TcpStream>,
-}
-
-impl ErrorType for TcpTransport {
-    type Error = TransportError;
 }
 
 impl TcpTransport {
@@ -63,21 +63,51 @@ impl MqttTransport for TcpTransport {
     }
 }
 
-impl Read for TcpTransport {
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        let stream = self.get_stream_mut()?;
-        stream.read(buf).await.map_err(TransportError::from)
+impl AsyncRead for TcpTransport {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match self.stream.as_mut() {
+            Some(stream) => Pin::new(stream).poll_read(cx, buf),
+            None => Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                TransportError::ConnectionLost,
+            ))),
+        }
     }
 }
 
-impl Write for TcpTransport {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        let stream = self.get_stream_mut()?;
-        stream.write(buf).await.map_err(TransportError::from)
+impl AsyncWrite for TcpTransport {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match self.stream.as_mut() {
+            Some(stream) => Pin::new(stream).poll_write(cx, buf),
+            None => Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                TransportError::ConnectionLost,
+            ))),
+        }
     }
 
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        let stream = self.get_stream_mut()?;
-        stream.flush().await.map_err(TransportError::from)
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.stream.as_mut() {
+            Some(stream) => Pin::new(stream).poll_flush(cx),
+            None => Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                TransportError::ConnectionLost,
+            ))),
+        }
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.stream.as_mut() {
+            Some(stream) => Pin::new(stream).poll_shutdown(cx),
+            None => Poll::Ready(Ok(())),
+        }
     }
 }

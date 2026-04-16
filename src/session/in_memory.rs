@@ -29,6 +29,12 @@ impl InMemorySession {
             ..Default::default()
         }
     }
+
+    fn find_subscription_pid(&self, topic_filter: &TopicFilter) -> Option<Pid> {
+        self.subscriptions
+            .iter()
+            .find_map(|(pid, info)| (info.topic_filter == *topic_filter).then_some(*pid))
+    }
 }
 
 impl Default for InMemorySession {
@@ -157,15 +163,16 @@ impl SessionState for InMemorySession {
         Ok(())
     }
 
-    fn remove_subscription(&mut self, pid: Pid) -> Option<SubscriptionInfo> {
-        if let Some(subscription) = self.subscriptions.remove(&pid) {
-            self.active_topics.remove(&subscription.topic_filter);
+    fn remove_subscription(&mut self, topic_filter: &TopicFilter) -> Option<SubscriptionInfo> {
+        if let Some(pid) = self.find_subscription_pid(topic_filter) {
+            let subscription = self.subscriptions.remove(&pid);
+            self.active_topics.remove(topic_filter);
             log::debug!(
                 "Removed subscription: {} (PID: {})",
-                subscription.topic_filter,
+                topic_filter,
                 pid.value()
             );
-            Some(subscription)
+            subscription
         } else {
             None
         }

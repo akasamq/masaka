@@ -4,8 +4,8 @@ use alloc::vec::Vec;
 
 use bytes::Bytes;
 use hashbrown::HashMap;
-use mqtt_proto::v5::{UserProperty, VarByteInt};
 use mqtt_proto::TopicName;
+use mqtt_proto::v5::{UserProperty, VarByteInt};
 
 /// A trait for protocol-specific configurations.
 pub trait MqttProtocolConfig: core::fmt::Debug + Clone {

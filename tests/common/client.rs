@@ -1,9 +1,9 @@
-use std::net::SocketAddr;
-use std::time::Duration;
+use core::net::SocketAddr;
+use core::time::Duration;
 
 use masaka::{
-    protocol::V3Handler, protocol::V5Handler, transport::TcpTransport, ClientConfig, MqttClient,
-    ReconnectConfig, V5ConnectConfig,
+    ClientConfig, MqttClient, ReconnectConfig, V5ConnectConfig, protocol::V3Handler,
+    protocol::V5Handler, transport::TcpTransport,
 };
 use tokio::time::timeout;
 
@@ -15,12 +15,10 @@ pub fn base_config(id: &str) -> ClientConfig {
         .with_reconnect(ReconnectConfig::disabled())
 }
 
-/// Create and connect an MQTT v3 client with the default config.
 pub async fn client_v3(addr: SocketAddr, id: &str) -> MqttClient<TcpTransport, V3Handler> {
     client_v3_config(addr, base_config(id)).await
 }
 
-/// Create and connect an MQTT v3 client with a custom `ClientConfig`.
 pub async fn client_v3_config(
     addr: SocketAddr,
     config: ClientConfig,
@@ -32,14 +30,11 @@ pub async fn client_v3_config(
     client
 }
 
-/// Create and connect an MQTT v5 client with default configs.
 pub async fn client_v5(addr: SocketAddr, id: &str) -> MqttClient<TcpTransport, V5Handler> {
-    client_v5_full(addr, base_config(id), V5ConnectConfig::new()).await
+    client_v5_config(addr, base_config(id), V5ConnectConfig::new()).await
 }
 
-/// Create and connect an MQTT v5 client with custom configs.
-/// Pass `V5ConnectConfig::new()` for the default v5 connect options.
-pub async fn client_v5_full(
+pub async fn client_v5_config(
     addr: SocketAddr,
     config: ClientConfig,
     v5_config: V5ConnectConfig,

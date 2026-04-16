@@ -1,11 +1,11 @@
 [package]
 name = "masaka"
 version = "0.1.0"
-edition = "2021"
-description = "A highly modular, no-std async MQTT client"
 authors = ["Sieluna <seele.peng@gmail.com>"]
-license = "MIT"
+edition = "2024"
+description = "A highly modular, no-std async MQTT client"
 repository = "https://github.com/akasamq/masaka"
+license = "MIT"
 
 [dependencies]
 bytes = { version = "1", default-features = false }
@@ -31,11 +31,13 @@ embassy-executor = { version = "0.10", features = ["executor-thread", "platform-
 embassy-time = { version = "0.5", features = ["generic-queue-16", "std"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 
+[patch.crates-io]
+mqtt-proto = { git = "https://github.com/akasamq/mqtt-proto.git", branch = "patch" }
+
 [features]
 default = ["embassy", "std"]
 
 std = [
-    "dep:tokio",
     "bytes/std",
     "embassy-net?/std",
     "embassy-time?/std",
@@ -46,7 +48,7 @@ std = [
 
 # Async runtime
 embassy = ["dep:embassy-net", "dep:embassy-time"]
-tokio = ["std", "dep:tokio"]
+tokio = ["mqtt-proto/tokio", "std", "dep:tokio"]
 
 tls = []
 # tls = ["dep:rustls"]
